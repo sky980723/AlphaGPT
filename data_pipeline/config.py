@@ -1,4 +1,5 @@
 import os
+from urllib.parse import quote_plus
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -9,14 +10,14 @@ class Config:
     DB_HOST = os.getenv("DB_HOST", "localhost")
     DB_PORT = os.getenv("DB_PORT", "5432")
     DB_NAME = os.getenv("DB_NAME", "crypto_quant")
-    DB_DSN = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    DB_DSN = f"postgresql://{DB_USER}:{quote_plus(DB_PASSWORD)}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
     CHAIN = "solana"
     TIMEFRAME = "1m" # 也支持 15min
-    MIN_LIQUIDITY_USD = 500000.0  
-    MIN_FDV = 10000000.0            
+    MIN_LIQUIDITY_USD = 10000.0
+    MIN_FDV = 100000.0
     MAX_FDV = float('inf') 
     BIRDEYE_API_KEY = os.getenv("BIRDEYE_API_KEY", "")
-    BIRDEYE_IS_PAID = True
-    USE_DEXSCREENER = False
-    CONCURRENCY = 20
-    HISTORY_DAYS = 7
+    BIRDEYE_IS_PAID = False
+    USE_DEXSCREENER = True
+    CONCURRENCY = 1
+    HISTORY_DAYS = 60

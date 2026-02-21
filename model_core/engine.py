@@ -25,20 +25,26 @@ class AlphaEngine:
         self.model = AlphaGPT().to(ModelConfig.DEVICE)
         
         # Standard optimizer
-        self.opt = torch.optim.AdamW(self.model.parameters(), lr=1e-3)
+        self.opt = torch.optim.AdamW(self.model.parameters(), lr=5e-4)
+        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            self.opt,
+            T_max=ModelConfig.TRAIN_STEPS,
+            eta_min=1e-5
+        )
         
         # Low-Rank Decay regularizer
         self.use_lord = use_lord_regularization
+        lord_target_keywords = ["attention", "qk_norm"]
         if self.use_lord:
             self.lord_opt = NewtonSchulzLowRankDecay(
                 self.model.named_parameters(),
                 decay_rate=lord_decay_rate,
                 num_iterations=lord_num_iterations,
-                target_keywords=["q_proj", "k_proj", "attention", "qk_norm"]
+                target_keywords=lord_target_keywords
             )
             self.rank_monitor = StableRankMonitor(
                 self.model,
-                target_keywords=["q_proj", "k_proj"]
+                target_keywords=lord_target_keywords
             )
         else:
             self.lord_opt = None
@@ -55,12 +61,14 @@ class AlphaEngine:
             'best_score': [],
             'stable_rank': []
         }
+        self.patience_counter = 0
+        self.patience = ModelConfig.EARLY_STOP_PATIENCE
 
     def train(self):
         print("🚀 Starting Meme Alpha Mining with LoRD Regularization..." if self.use_lord else "🚀 Starting Meme Alpha Mining...")
         if self.use_lord:
             print(f"   LoRD Regularization enabled")
-            print(f"   Target keywords: ['q_proj', 'k_proj', 'attention', 'qk_norm']")
+            print(f"   Target keywords: ['attention', 'qk_norm']")
         
         pbar = tqdm(range(ModelConfig.TRAIN_STEPS))
         
@@ -69,20 +77,23 @@ class AlphaEngine:
             inp = torch.zeros((bs, 1), dtype=torch.long, device=ModelConfig.DEVICE)
             
             log_probs = []
+            entropies = []
             tokens_list = []
-            
+
             for _ in range(ModelConfig.MAX_FORMULA_LEN):
                 logits, _, _ = self.model(inp)
                 dist = Categorical(logits=logits)
                 action = dist.sample()
-                
+
                 log_probs.append(dist.log_prob(action))
+                entropies.append(dist.entropy())
                 tokens_list.append(action)
                 inp = torch.cat([inp, action.unsqueeze(1)], dim=1)
             
             seqs = torch.stack(tokens_list, dim=1)
             
             rewards = torch.zeros(bs, device=ModelConfig.DEVICE)
+            best_updated = False
             
             for i in range(bs):
                 formula = seqs[i].tolist()
@@ -90,38 +101,57 @@ class AlphaEngine:
                 res = self.vm.execute(formula, self.loader.feat_tensor)
                 
                 if res is None:
-                    rewards[i] = -5.0
-                    continue
-                
-                if res.std() < 1e-4:
                     rewards[i] = -2.0
                     continue
                 
+                if res.std() < 1e-4:
+                    rewards[i] = -1.0
+                    continue
+                
                 score, ret_val = self.bt.evaluate(res, self.loader.raw_data_cache, self.loader.target_ret)
+                if torch.isnan(score) or torch.isinf(score):
+                    rewards[i] = -2.0
+                    continue
                 rewards[i] = score
                 
                 if score.item() > self.best_score:
                     self.best_score = score.item()
                     self.best_formula = formula
+                    best_updated = True
                     tqdm.write(f"[!] New King: Score {score:.2f} | Ret {ret_val:.2%} | Formula {formula}")
             
             # Normalize rewards
             adv = (rewards - rewards.mean()) / (rewards.std() + 1e-5)
             
             loss = 0
+            entropy_bonus = 0
             for t in range(len(log_probs)):
                 loss += -log_probs[t] * adv
-            
-            loss = loss.mean()
+                entropy_bonus += entropies[t]
+
+            # Linearly decay entropy coefficient from start to end value.
+            progress = step / max(ModelConfig.TRAIN_STEPS - 1, 1)
+            entropy_coeff = (
+                ModelConfig.ENTROPY_COEFF_START
+                + (ModelConfig.ENTROPY_COEFF_END - ModelConfig.ENTROPY_COEFF_START) * progress
+            )
+            loss = loss.mean() - entropy_coeff * entropy_bonus.mean()
             
             # Gradient step
             self.opt.zero_grad()
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=ModelConfig.GRAD_CLIP_NORM)
             self.opt.step()
+            self.scheduler.step()
             
             # Apply Low-Rank Decay regularization
             if self.use_lord:
                 self.lord_opt.step()
+
+            if best_updated:
+                self.patience_counter = 0
+            else:
+                self.patience_counter += 1
             
             # Logging
             avg_reward = rewards.mean().item()
@@ -137,6 +167,13 @@ class AlphaEngine:
             self.training_history['best_score'].append(self.best_score)
             
             pbar.set_postfix(postfix_dict)
+
+            if self.patience_counter >= self.patience:
+                tqdm.write(
+                    f"[!] Early stopping triggered at step {step + 1} after "
+                    f"{self.patience} steps without best score improvement."
+                )
+                break
 
         # Save best formula
         with open("best_meme_strategy.json", "w") as f:

@@ -103,7 +103,7 @@ class AdvancedFactorEngineer:
         return torch.clamp(norm, -5.0, 5.0)
     
     def compute_advanced_features(self, raw_dict):
-        """Compute 12-dimensional feature space with advanced factors"""
+        """Compute 9-dimensional feature space (IC-screened)"""
         c = raw_dict['close']
         o = raw_dict['open']
         h = raw_dict['high']
@@ -111,81 +111,44 @@ class AdvancedFactorEngineer:
         v = raw_dict['volume']
         liq = raw_dict['liquidity']
         fdv = raw_dict['fdv']
-        
+
         # Basic factors
         ret = torch.log(c / (torch.roll(c, 1, dims=1) + 1e-9))
         liq_score = MemeIndicators.liquidity_health(liq, fdv)
         pressure = MemeIndicators.buy_sell_imbalance(c, o, h, l)
-        fomo = MemeIndicators.fomo_acceleration(v)
         dev = MemeIndicators.pump_deviation(c)
-        log_vol = torch.log1p(v)
-        
+
         # Advanced factors
         vol_cluster = MemeIndicators.volatility_clustering(c)
         momentum_rev = MemeIndicators.momentum_reversal(c)
         rel_strength = MemeIndicators.relative_strength(c, h, l)
-        
+
         # High-low range
         hl_range = (h - l) / (c + 1e-9)
-        
+
         # Close position in range
         close_pos = (c - l) / (h - l + 1e-9)
-        
-        # Volume trend
-        vol_prev = torch.roll(v, 1, dims=1)
-        vol_trend = (v - vol_prev) / (vol_prev + 1.0)
-        
+
         features = torch.stack([
             self.robust_norm(ret),
             liq_score,
             pressure,
-            self.robust_norm(fomo),
             self.robust_norm(dev),
-            self.robust_norm(log_vol),
             self.robust_norm(vol_cluster),
             momentum_rev,
             self.robust_norm(rel_strength),
             self.robust_norm(hl_range),
             close_pos,
-            self.robust_norm(vol_trend)
         ], dim=1)
-        
+
         return features
 
 
 class FeatureEngineer:
-    INPUT_DIM = 6
+    INPUT_DIM = 9
+
+    _advanced = AdvancedFactorEngineer()
 
     @staticmethod
     def compute_features(raw_dict):
-        c = raw_dict['close']
-        o = raw_dict['open']
-        h = raw_dict['high']
-        l = raw_dict['low']
-        v = raw_dict['volume']
-        liq = raw_dict['liquidity']
-        fdv = raw_dict['fdv']
-        
-        ret = torch.log(c / (torch.roll(c, 1, dims=1) + 1e-9))
-        liq_score = MemeIndicators.liquidity_health(liq, fdv)
-        pressure = MemeIndicators.buy_sell_imbalance(c, o, h, l)
-        fomo = MemeIndicators.fomo_acceleration(v)
-        dev = MemeIndicators.pump_deviation(c)
-        log_vol = torch.log1p(v)
-        
-        def robust_norm(t):
-            median = torch.nanmedian(t, dim=1, keepdim=True)[0]
-            mad = torch.nanmedian(torch.abs(t - median), dim=1, keepdim=True)[0] + 1e-6
-            norm = (t - median) / mad
-            return torch.clamp(norm, -5.0, 5.0)
-
-        features = torch.stack([
-            robust_norm(ret),
-            liq_score,
-            pressure,
-            robust_norm(fomo),
-            robust_norm(dev),
-            robust_norm(log_vol)
-        ], dim=1)
-        
-        return features
+        return FeatureEngineer._advanced.compute_advanced_features(raw_dict)
