@@ -63,6 +63,8 @@ class AlphaEngine:
         }
         self.patience_counter = 0
         self.patience = ModelConfig.EARLY_STOP_PATIENCE
+        self.avg_reward_ema = None
+        self.best_avg_reward = -float('inf')
 
     def train(self):
         print("🚀 Starting Meme Alpha Mining with LoRD Regularization..." if self.use_lord else "🚀 Starting Meme Alpha Mining...")
@@ -75,13 +77,17 @@ class AlphaEngine:
         for step in pbar:
             bs = ModelConfig.BATCH_SIZE
             inp = torch.zeros((bs, 1), dtype=torch.long, device=ModelConfig.DEVICE)
+            stack_sizes = torch.zeros(bs, dtype=torch.long, device=ModelConfig.DEVICE)
             
             log_probs = []
             entropies = []
             tokens_list = []
 
-            for _ in range(ModelConfig.MAX_FORMULA_LEN):
+            for t in range(ModelConfig.MAX_FORMULA_LEN):
                 logits, _, _ = self.model(inp)
+                # Syntax-guided masking: ensure only valid tokens are sampled
+                syntax_mask = self.vm.compute_syntax_mask(stack_sizes, t, ModelConfig.MAX_FORMULA_LEN)
+                logits = logits.masked_fill(~syntax_mask, float('-inf'))
                 dist = Categorical(logits=logits)
                 action = dist.sample()
 
@@ -89,6 +95,9 @@ class AlphaEngine:
                 entropies.append(dist.entropy())
                 tokens_list.append(action)
                 inp = torch.cat([inp, action.unsqueeze(1)], dim=1)
+                # Update stack sizes based on sampled actions
+                self.vm._ensure_device(ModelConfig.DEVICE)
+                stack_sizes = stack_sizes + self.vm._delta_d[action]
             
             seqs = torch.stack(tokens_list, dim=1)
             
@@ -148,13 +157,20 @@ class AlphaEngine:
             if self.use_lord:
                 self.lord_opt.step()
 
-            if best_updated:
+            # Logging
+            avg_reward = rewards.mean().item()
+
+            # Early stopping based on avg_reward EMA (not best_score)
+            if self.avg_reward_ema is None:
+                self.avg_reward_ema = avg_reward
+            else:
+                self.avg_reward_ema = 0.95 * self.avg_reward_ema + 0.05 * avg_reward
+
+            if self.avg_reward_ema > self.best_avg_reward:
+                self.best_avg_reward = self.avg_reward_ema
                 self.patience_counter = 0
             else:
                 self.patience_counter += 1
-            
-            # Logging
-            avg_reward = rewards.mean().item()
             postfix_dict = {'AvgRew': f"{avg_reward:.3f}", 'BestScore': f"{self.best_score:.3f}"}
             
             if self.use_lord and step % 100 == 0:
@@ -170,8 +186,8 @@ class AlphaEngine:
 
             if self.patience_counter >= self.patience:
                 tqdm.write(
-                    f"[!] Early stopping triggered at step {step + 1} after "
-                    f"{self.patience} steps without best score improvement."
+                    f"[!] Early stopping at step {step + 1}: avg_reward EMA "
+                    f"({self.avg_reward_ema:.4f}) stagnated for {self.patience} steps."
                 )
                 break
 
