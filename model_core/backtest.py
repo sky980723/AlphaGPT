@@ -27,9 +27,15 @@ class MemeBacktest:
         gross_pnl = position * target_ret
         net_pnl = gross_pnl - tx_cost
         cum_ret = net_pnl.sum(dim=1)
-        big_drawdowns = (net_pnl < -0.05).float().sum(dim=1)
-        score = cum_ret - (big_drawdowns * 2.0)
         activity = position.sum(dim=1)
-        score = torch.where(activity < 5, torch.tensor(-10.0, device=score.device), score)
-        final_fitness = torch.median(score)
+
+        # Sharpe-like fitness: continuous, differentiable, no arbitrary thresholds
+        mean_ret = net_pnl.mean(dim=1)
+        std_ret = net_pnl.std(dim=1) + 1e-6
+        sharpe = mean_ret / std_ret
+
+        # Penalize inactive strategies
+        sharpe = torch.where(activity < 5, torch.tensor(-10.0, device=sharpe.device), sharpe)
+
+        final_fitness = torch.median(sharpe)
         return final_fitness, cum_ret.mean().item()
