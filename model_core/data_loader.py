@@ -106,13 +106,15 @@ class CryptoDataLoader:
         self.target_ret = torch.log(t2 / (t1 + 1e-9))
         self.target_ret = torch.nan_to_num(self.target_ret, nan=0.0, posinf=0.0, neginf=0.0)
         self.target_ret[:, -2:] = 0.0
-        # Full data for training (no split — direction B)
-        self.feat_tensor_train = self.feat_tensor
-        self.feat_tensor_test = self.feat_tensor
-        self.target_ret_train = self.target_ret
-        self.target_ret_test = self.target_ret
-        self.raw_data_train = self.raw_data_cache
-        self.raw_data_test = self.raw_data_cache
-        print(f"Full data mode: {self.feat_tensor.shape[2]} time steps (no train/test split)")
+        # Walk-forward train/test split along time axis
+        T = self.feat_tensor.shape[2]
+        split = int(T * ModelConfig.TRAIN_RATIO)
+        self.feat_tensor_train = self.feat_tensor[:, :, :split]
+        self.feat_tensor_test = self.feat_tensor[:, :, split:]
+        self.target_ret_train = self.target_ret[:, :split]
+        self.target_ret_test = self.target_ret[:, split:]
+        self.raw_data_train = {k: v[:, :split] for k, v in self.raw_data_cache.items()}
+        self.raw_data_test = {k: v[:, split:] for k, v in self.raw_data_cache.items()}
+        print(f"Train/Test split: {split}/{T-split} time steps ({ModelConfig.TRAIN_RATIO:.0%}/{1-ModelConfig.TRAIN_RATIO:.0%})")
         nan_count = torch.isnan(self.feat_tensor).sum().item()
         print(f"Data Ready. Shape: {self.feat_tensor.shape} ({len(actual_addrs)} tokens, NaN={nan_count})")

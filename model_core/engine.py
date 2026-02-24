@@ -180,8 +180,19 @@ class AlphaEngine:
                 postfix_dict['Rank'] = f"{stable_rank:.2f}"
                 self.training_history['stable_rank'].append(stable_rank)
 
-            # OOS evaluation disabled (full data mode)
+            # Out-of-sample evaluation every 50 steps
             oos_score_val = None
+            if self.best_formula is not None and step % 50 == 0:
+                oos_res = self.vm.execute(self.best_formula, self.loader.feat_tensor_test)
+                if oos_res is not None:
+                    oos_s, oos_ret = self.bt.evaluate(
+                        oos_res, self.loader.raw_data_test, self.loader.target_ret_test
+                    )
+                    if not (torch.isnan(oos_s) or torch.isinf(oos_s)):
+                        oos_score_val = oos_s.item()
+                        if oos_score_val > self.best_oos_score:
+                            self.best_oos_score = oos_score_val
+                        postfix_dict['OOS'] = f"{oos_score_val:.4f}"
             self.training_history['oos_score'].append(oos_score_val)
             
             self.training_history['step'].append(step)
