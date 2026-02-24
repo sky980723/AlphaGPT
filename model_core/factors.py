@@ -103,7 +103,7 @@ class AdvancedFactorEngineer:
         return torch.clamp(norm, -5.0, 5.0)
     
     def compute_advanced_features(self, raw_dict):
-        """Compute 9-dimensional feature space (IC-screened)"""
+        """Compute 12-dimensional feature space (IC-screened)"""
         c = raw_dict['close']
         o = raw_dict['open']
         h = raw_dict['high']
@@ -129,6 +129,23 @@ class AdvancedFactorEngineer:
         # Close position in range
         close_pos = (c - l) / (h - l + 1e-9)
 
+        # FOMO acceleration
+        fomo_acc = MemeIndicators.fomo_acceleration(v)
+
+        # Volume ratio: current volume / rolling average volume
+        vol_pad = torch.zeros((v.shape[0], 4), device=v.device)
+        v_pad = torch.cat([vol_pad, v], dim=1)
+        vol_avg = v_pad.unfold(1, 5, 1).mean(dim=-1)
+        vol_ratio = v / (vol_avg + 1e-9)
+
+        # VWAP deviation: price deviation from volume-weighted average price
+        vwap_num_pad = torch.zeros((c.shape[0], 4), device=c.device)
+        cv = c * v
+        cv_pad = torch.cat([vwap_num_pad, cv], dim=1)
+        v_pad2 = torch.cat([vwap_num_pad, v], dim=1)
+        vwap = cv_pad.unfold(1, 5, 1).sum(dim=-1) / (v_pad2.unfold(1, 5, 1).sum(dim=-1) + 1e-9)
+        vwap_dev = (c - vwap) / (vwap + 1e-9)
+
         features = torch.stack([
             self.robust_norm(ret),
             liq_score,
@@ -139,13 +156,16 @@ class AdvancedFactorEngineer:
             self.robust_norm(rel_strength),
             self.robust_norm(hl_range),
             close_pos,
+            self.robust_norm(fomo_acc),
+            self.robust_norm(vol_ratio),
+            self.robust_norm(vwap_dev),
         ], dim=1)
 
         return features
 
 
 class FeatureEngineer:
-    INPUT_DIM = 9
+    INPUT_DIM = 12
 
     _advanced = AdvancedFactorEngineer()
 

@@ -12,6 +12,12 @@ class CryptoDataLoader:
         self.feat_tensor = None
         self.raw_data_cache = None
         self.target_ret = None
+        self.feat_tensor_train = None
+        self.feat_tensor_test = None
+        self.target_ret_train = None
+        self.target_ret_test = None
+        self.raw_data_train = None
+        self.raw_data_test = None
 
     def load_data(self, limit_tokens=500, min_data_ratio=0.05):
         print("Loading data from SQL...")
@@ -100,5 +106,13 @@ class CryptoDataLoader:
         self.target_ret = torch.log(t2 / (t1 + 1e-9))
         self.target_ret = torch.nan_to_num(self.target_ret, nan=0.0, posinf=0.0, neginf=0.0)
         self.target_ret[:, -2:] = 0.0
+        # Full data for training (no split — direction B)
+        self.feat_tensor_train = self.feat_tensor
+        self.feat_tensor_test = self.feat_tensor
+        self.target_ret_train = self.target_ret
+        self.target_ret_test = self.target_ret
+        self.raw_data_train = self.raw_data_cache
+        self.raw_data_test = self.raw_data_cache
+        print(f"Full data mode: {self.feat_tensor.shape[2]} time steps (no train/test split)")
         nan_count = torch.isnan(self.feat_tensor).sum().item()
         print(f"Data Ready. Shape: {self.feat_tensor.shape} ({len(actual_addrs)} tokens, NaN={nan_count})")

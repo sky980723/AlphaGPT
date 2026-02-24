@@ -34,8 +34,8 @@ class MemeBacktest:
         std_ret = net_pnl.std(dim=1) + 1e-6
         sharpe = mean_ret / std_ret
 
-        # Penalize inactive strategies
-        sharpe = torch.where(activity < 5, torch.tensor(-10.0, device=sharpe.device), sharpe)
+        # Hard activity penalty (softer than -10.0 to avoid gradient distortion)
+        sharpe = torch.where(activity < 5, torch.tensor(-5.0, device=sharpe.device), sharpe)
 
         final_fitness = torch.median(sharpe)
         return final_fitness, cum_ret.mean().item()

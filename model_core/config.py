@@ -18,4 +18,4 @@ class ModelConfig:
     TRADE_SIZE_USD = 1000.0
     MIN_LIQUIDITY = 5000.0 # Treat lower liquidity as zero / non-tradable.
     BASE_FEE = 0.005 # Base fee rate 0.5% (Swap + Gas + Jito Tip).
-    INPUT_DIM = 9
+    INPUT_DIM = 12

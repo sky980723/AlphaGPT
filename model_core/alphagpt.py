@@ -224,7 +224,8 @@ class AlphaGPT(nn.Module):
         self.d_model = 64
         self.features_list = [
             'RET', 'LIQ_HEALTH', 'PRESSURE', 'PUMP_DEV',
-            'VOL_CLUSTER', 'MOM_REV', 'REL_STR', 'HL_RANGE', 'CLOSE_POS'
+            'VOL_CLUSTER', 'MOM_REV', 'REL_STR', 'HL_RANGE', 'CLOSE_POS',
+            'FOMO_ACC', 'VOL_RATIO', 'VWAP_DEV'
         ]
         self.ops_list = [cfg[0] for cfg in OPS_CONFIG]
         

@@ -10,7 +10,7 @@ from .vm import StackVM
 from .backtest import MemeBacktest
 
 class AlphaEngine:
-    def __init__(self, use_lord_regularization=True, lord_decay_rate=1e-3, lord_num_iterations=5):
+    def __init__(self, use_lord_regularization=True, lord_decay_rate=5e-4, lord_num_iterations=5):
         """
         Initialize AlphaGPT training engine.
         
@@ -59,8 +59,10 @@ class AlphaEngine:
             'step': [],
             'avg_reward': [],
             'best_score': [],
+            'oos_score': [],
             'stable_rank': []
         }
+        self.best_oos_score = -float('inf')
         self.patience_counter = 0
         self.patience = ModelConfig.EARLY_STOP_PATIENCE
         self.avg_reward_ema = None
@@ -107,7 +109,7 @@ class AlphaEngine:
             for i in range(bs):
                 formula = seqs[i].tolist()
                 
-                res = self.vm.execute(formula, self.loader.feat_tensor)
+                res = self.vm.execute(formula, self.loader.feat_tensor_train)
                 
                 if res is None:
                     rewards[i] = -2.0
@@ -117,7 +119,7 @@ class AlphaEngine:
                     rewards[i] = -1.0
                     continue
                 
-                score, ret_val = self.bt.evaluate(res, self.loader.raw_data_cache, self.loader.target_ret)
+                score, ret_val = self.bt.evaluate(res, self.loader.raw_data_train, self.loader.target_ret_train)
                 if torch.isnan(score) or torch.isinf(score):
                     rewards[i] = -2.0
                     continue
@@ -177,6 +179,10 @@ class AlphaEngine:
                 stable_rank = self.rank_monitor.compute()
                 postfix_dict['Rank'] = f"{stable_rank:.2f}"
                 self.training_history['stable_rank'].append(stable_rank)
+
+            # OOS evaluation disabled (full data mode)
+            oos_score_val = None
+            self.training_history['oos_score'].append(oos_score_val)
             
             self.training_history['step'].append(step)
             self.training_history['avg_reward'].append(avg_reward)
@@ -203,6 +209,9 @@ class AlphaEngine:
         print(f"\n✓ Training completed!")
         print(f"  Best score: {self.best_score:.4f}")
         print(f"  Best formula: {self.best_formula}")
+        if self.best_oos_score > -float('inf'):
+            print(f"  Best OOS score: {self.best_oos_score:.6f}")
+            print(f"  OOS profitable: {'YES' if self.best_oos_score > 0 else 'NO'}")
 
 
 if __name__ == "__main__":
